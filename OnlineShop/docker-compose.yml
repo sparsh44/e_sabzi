@@ -1,0 +1,135 @@
+---
+version: '3.8'
+services:
+  ## MySQL Docker Compose Config
+  mysql_order:
+    container_name: mysql_order
+    image: mysql:latest
+    environment:
+      MYSQL_DATABASE: order_service
+      MYSQL_ROOT_PASSWORD: root
+    volumes:
+      - ./mysql_order:/var/lib/mysql
+    ports:
+      - "3307:3306"
+    restart: always
+
+
+  ## Mongo Docker Compose Config
+  mongo:
+    container_name: mongo
+    image: mongo:latest
+    restart: always
+    ports:
+      - "27017:27017"
+    expose:
+      - "27017"
+    volumes:
+      - ./mongo_data:/data/db
+
+  ## Keycloak Config with Mysql database
+  keycloak_mysql:
+    container_name: keycloak_mysql
+    image: mysql:latest
+    volumes:
+      - ./mysql_keycloak_data:/var/lib/mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: keycloak
+      MYSQL_PASSWORD: root
+
+  keycloak:
+    container_name: keycloak
+    image: quay.io/keycloak/keycloak:18.0.0
+    command: [ "start-dev" ]
+    environment:
+      DB_VENDOR: MYSQL
+      DB_ADDR: mysql
+      DB_DATABASE: keycloak
+      DB_USER: keycloak
+      DB_PASSWORD: password
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./realms/:/opt/keycloak/data/import/
+    depends_on:
+      - keycloak_mysql
+
+  ## Eureka Server
+  discovery_server:
+    image: sparsh44/discovery_server_image_01:latest
+    container_name: discovery_server
+    ports:
+      - "8761:8761"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+
+  api_gateway:
+    image: sparsh44/api_gateway_image_01:latest
+    container_name: api_gateway
+    ports:
+      - "8182:8080"
+    expose:
+      - "8182"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_SECURITY= TRACE
+    depends_on:
+      - discovery_server
+      - keycloak
+
+  ## Product-Service Docker Compose Config
+  product-service:
+    container_name: product_service
+    image: sparsh44/product_service_image_01:latest
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+    depends_on:
+      - mongo
+      - discovery_server
+      - api_gateway
+
+  ## Order-Service Docker Compose Config
+  order-service:
+    container_name: order_service
+    image: sparsh44/order_service_image_01:latest
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - SPRING_DATASOURCE_URL=jdbc:mysql://mysql_order:3306/order_service
+    depends_on:
+      - mysql_order
+      - discovery_server
+      - api_gateway
+
+
+
+#  ## Prometheus
+#  prometheus:
+#    image: prom/prometheus:v2.37.1
+#    container_name: prometheus
+#    restart: always
+#    ports:
+#      - "9090:9090"
+#    volumes:
+#      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+#    depends_on:
+#      - product-service
+#      - inventory-service
+#      - order-service
+#      - notification-service
+#
+#  grafana:
+#    image: grafana/grafana-oss:8.5.2
+#    container_name: grafana
+#    restart: always
+#    ports:
+#      - "3000:3000"
+#    links:
+#      - prometheus:prometheus
+#    volumes:
+#      - ./grafana:/var/lib/grafana
+#    environment:
+#      - GF_SECURITY_ADMIN_USER=admin
+#      - GF_SECURITY_ADMIN_PASSWORD=password
